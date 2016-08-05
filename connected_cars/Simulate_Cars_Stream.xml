@@ -1,0 +1,166 @@
+ <project name="Simulate_Cars_Stream" pubsub="none" threads="1">
+   <contqueries>
+     <contquery name="Continuous_Query_1">
+       <windows>
+         <window-source name="Input_cars" index="pi_HASH" pubsub="false" collapse-updates="true" autogen-key="false">
+           <schema>
+             <fields>
+               <field name="DateTime" type="stamp" key="true"/>
+               <field name="car_key" type="double" key="true"/>
+               <field name="Speed_OBD" type="double"/>
+               <field name="RPM" type="double"/>
+               <field name="Engine_load_pct" type="double"/>
+               <field name="Engine_Coolant_temp" type="double"/>
+               <field name="CO2_Emissions_avg" type="double"/>
+               <field name="GPS_Altitude" type="double"/>
+               <field name="Model_ID" type="double"/>
+             </fields>
+           </schema>
+           <connectors>
+             <connector name="New_Connector_1" class="fs">
+               <properties>
+                 <property name="type"><![CDATA[pub]]></property>
+                 <property name="fsname"><![CDATA[C:\Users\sas\Downloads\cars_data.csv]]></property>
+                 <property name="fstype"><![CDATA[csv]]></property>
+                 <property name="growinginputfile"><![CDATA[true]]></property>
+               </properties>
+             </connector>
+           </connectors>
+         </window-source>
+         <window-filter name="C02_emissions_above_290" pubsub="false" collapse-updates="true">
+           <expression><![CDATA[CO2_Emissions_avg > 290]]></expression>
+         </window-filter>
+         <window-copy name="Last_30_secs" index="pi_HASH" pubsub="false" collapse-updates="true">
+           <retention type="bytime_sliding">30 seconds</retention>
+         </window-copy>
+         <window-aggregate name="Aggregate_Speed" pubsub="false" collapse-updates="true">
+           <schema>
+             <fields>
+               <field name="Average_Speed" type="double"/>
+               <field name="Max_Speed" type="double"/>
+               <field name="Std_Speed" type="double"/>
+               <field name="Model_ID" type="double" key="true"/>
+             </fields>
+           </schema>
+           <output>
+             <field-expr><![CDATA[ESP_aAve(Speed_OBD)]]></field-expr>
+             <field-expr><![CDATA[ESP_aMax(Speed_OBD)]]></field-expr>
+             <field-expr><![CDATA[ESP_aStd(Speed_OBD)]]></field-expr>
+           </output>
+         </window-aggregate>
+         <window-copy name="Last_Minute" index="pi_HASH" pubsub="false" collapse-updates="true">
+           <retention type="bytime_sliding">60 seconds</retention>
+         </window-copy>
+         <window-aggregate name="Agg_CO2_n_Load" pubsub="false" collapse-updates="true">
+           <schema>
+             <fields>
+               <field name="Model_ID" type="double" key="true"/>
+               <field name="Average_Engine_Load_Pct" type="double"/>
+               <field name="Avg_Co2_Emissions" type="double"/>
+               <field name="Model_Rec_Cnt" type="double"/>
+             </fields>
+           </schema>
+           <output>
+             <field-expr><![CDATA[ESP_aAve(Engine_load_pct)]]></field-expr>
+             <field-expr><![CDATA[ESP_aAve(CO2_Emissions_avg)]]></field-expr>
+             <field-expr><![CDATA[ESP_aCount()]]></field-expr>
+           </output>
+         </window-aggregate>
+         <window-compute name="Enrich_30s_SpeedData" pubsub="false" collapse-updates="true">
+           <schema>
+             <fields>
+               <field name="Model_ID" type="double" key="true"/>
+               <field name="Average_Speed" type="double"/>
+               <field name="Max_Speed" type="double"/>
+               <field name="Std_Speed" type="double"/>
+               <field name="Speed_HL" type="double"/>
+             </fields>
+           </schema>
+           <output>
+             <field-expr><![CDATA[Average_Speed]]></field-expr>
+             <field-expr><![CDATA[Max_Speed]]></field-expr>
+             <field-expr><![CDATA[Std_Speed]]></field-expr>
+             <field-expr><![CDATA[Average_Speed +(1.5* Std_Speed)]]></field-expr>
+           </output>
+         </window-compute>
+         <window-aggregate name="Aggregate_by_Model" pubsub="false" collapse-updates="true">
+           <schema>
+             <fields>
+               <field name="Model_ID" type="double" key="true"/>
+               <field name="LT_High_Emissions_Incident_Cnt" type="double"/>
+             </fields>
+           </schema>
+           <output>
+             <field-expr><![CDATA[ESP_aCount()]]></field-expr>
+           </output>
+         </window-aggregate>
+         <window-join name="Join_Emission_Results" pubsub="false" collapse-updates="true">
+           <join type="fullouter">
+             <conditions>
+               <fields left="Model_ID" right="Model_ID"/>
+             </conditions>
+           </join>
+           <output>
+             <field-selection name="Last_Min_Co2_Emissions_Avg" source="l_Avg_Co2_Emissions"/>
+             <field-selection name="LT_High_Emissions_Incident_Cnt" source="r_LT_High_Emissions_Incident_Cnt"/>
+             <field-selection name="Last_Min_Record_Cnt" source="l_Model_Rec_Cnt"/>
+             <field-selection name="Last_Min_Engine_Load" source="l_Average_Engine_Load_Pct"/>
+           </output>
+         </window-join>
+         <window-pattern name="Pattern_High_Co2_and_Load" index="pi_EMPTY" collapse-updates="true">
+           <schema>
+             <fields>
+               <field name="car_key" type="int64" key="true"/>
+               <field name="car_key1" type="double"/>
+               <field name="car_key2" type="double"/>
+               <field name="M" type="double"/>
+               <field name="event1_co2" type="double"/>
+               <field name="event2_eng_load" type="double"/>
+             </fields>
+           </schema>
+           <patterns>
+             <pattern name="Emit_Load_Pattern">
+               <events>
+                 <event source="C02_emissions_above_290" name="e1"><![CDATA[M==Model_ID and CO2_Emissions_avg>300]]></event>
+                 <event source="C02_emissions_above_290" name="e2"><![CDATA[M==Model_ID and Engine_load_pct>.90]]></event>
+               </events>
+               <logic>fby(e1, e2)</logic>
+               <output>
+                 <field-selection name="car_key" node="e1"/>
+                 <field-selection name="car_key" node="e2"/>
+                 <field-selection name="Model_ID" node="e2"/>
+                 <field-selection name="CO2_Emissions_avg" node="e1"/>
+                 <field-selection name="Engine_load_pct" node="e2"/>
+               </output>
+               <timefields>
+                 <timefield source="C02_emissions_above_290" field="DateTime"/>
+               </timefields>
+             </pattern>
+           </patterns>
+           <connectors>
+             <connector name="New_Connector_1" class="fs">
+               <properties>
+                 <property name="type"><![CDATA[sub]]></property>
+                 <property name="snapshot"><![CDATA[true]]></property>
+                 <property name="fsname"><![CDATA[C:\Users\sas\Downloads\result.csv]]></property>
+                 <property name="fstype"><![CDATA[csv]]></property>
+               </properties>
+             </connector>
+           </connectors>
+         </window-pattern>
+       </windows>
+       <edges>
+         <edge source="Input_cars" target="C02_emissions_above_290"/>
+         <edge source="Input_cars" target="Last_30_secs"/>
+         <edge source="Last_30_secs" target="Aggregate_Speed"/>
+         <edge source="Input_cars" target="Last_Minute"/>
+         <edge source="Last_Minute" target="Agg_CO2_n_Load"/>
+         <edge source="Aggregate_Speed" target="Enrich_30s_SpeedData"/>
+         <edge source="C02_emissions_above_290" target="Aggregate_by_Model"/>
+         <edge source="Agg_CO2_n_Load" target="Join_Emission_Results"/>
+         <edge source="Aggregate_by_Model" target="Join_Emission_Results"/>
+         <edge source="C02_emissions_above_290" target="Pattern_High_Co2_and_Load"/>
+       </edges>
+     </contquery>
+   </contqueries>
+ </project>
