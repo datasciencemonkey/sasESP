@@ -15,7 +15,8 @@ def get_Model_ID():
 
 def get_time_stamp():
     """a simple time stamp generator """
-    return re.sub('\..+','',str(datetime.datetime.now()))
+    #return re.sub('\..+','',str(datetime.datetime.now())) #this was the original version
+    return  time.mktime(datetime.datetime.utcnow().timetuple())
 
 #Set variables
 opcode = 'i'
