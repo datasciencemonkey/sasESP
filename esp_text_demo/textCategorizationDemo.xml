@@ -1,0 +1,75 @@
+ <project name="textCategorizationDemo" pubsub="none" threads="1">
+   <contqueries>
+     <contquery name="Continuous_Query_1">
+       <windows>
+         <window-source name="text_data_source" collapse-updates="true" autogen-key="false">
+           <schema>
+             <fields>
+               <field name="unique_key" type="string" key="true"/>
+               <field name="csr_cuid" type="string"/>
+               <field name="region" type="string"/>
+               <field name="category" type="string"/>
+               <field name="DEVICE_ID" type="string"/>
+               <field name="Verbatim_Response" type="string"/>
+               <field name="Channel_flag" type="string"/>
+             </fields>
+           </schema>
+           <connectors>
+             <connector name="csvStreamer" class="fs">
+               <properties>
+                 <property name="type"><![CDATA[pub]]></property>
+                 <property name="fsname"><![CDATA[/home/sas/esp_text_demo/mytext_data.csv]]></property>
+                 <property name="fstype"><![CDATA[csv]]></property>
+               </properties>
+             </connector>
+           </connectors>
+         </window-source>
+         <window-textcategory name="Text_Category_Model" output-insert-only="false" collapse-updates="true" mco-file="/home/sas/esp_text_demo/categories.mco" text-field="Verbatim_Response"/>
+         <window-procedural name="Procedural_1" collapse-updates="true">
+           <schema>
+             <fields>
+               <field name="inputs_sequence" type="int64" key="true"/>
+               <field name="unique_key" type="string"/>
+               <field name="category" type="string"/>
+             </fields>
+           </schema>
+           <ds2-tableserver source="Text_Category_Model">
+             <code><![CDATA[ds2_options cdump;
+          data esp.out;
+          dcl bigint inputs_sequence;
+          retain inputs_sequence 0;
+          method run();
+          set esp.in;
+            inputs_sequence = inputs_sequence + 1;
+            _opcode=4;
+          end;
+          enddata;]]></code>
+           </ds2-tableserver>
+         </window-procedural>
+         <window-join name="Joined_Results" collapse-updates="true">
+           <join type="inner">
+             <conditions>
+               <fields left="unique_key" right="unique_key"/>
+             </conditions>
+           </join>
+           <output>
+             <field-selection name="unique_key" source="l_unique_key"/>
+             <field-selection name="csr_cuid" source="l_csr_cuid"/>
+             <field-selection name="region" source="l_region"/>
+             <field-selection name="plan_category" source="l_category"/>
+             <field-selection name="device_id" source="l_DEVICE_ID"/>
+             <field-selection name="verbatim_response" source="l_Verbatim_Response"/>
+             <field-selection name="channel_flag" source="l_Channel_flag"/>
+             <field-selection name="category" source="r_category"/>
+           </output>
+         </window-join>
+       </windows>
+       <edges>
+         <edge source="text_data_source" target="Text_Category_Model"/>
+         <edge source="Text_Category_Model" target="Procedural_1"/>
+         <edge source="text_data_source" target="Joined_Results"/>
+         <edge source="Procedural_1" target="Joined_Results"/>
+       </edges>
+     </contquery>
+   </contqueries>
+ </project>
